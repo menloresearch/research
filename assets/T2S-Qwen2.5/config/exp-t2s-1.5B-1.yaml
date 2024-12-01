@@ -1,0 +1,109 @@
+# Config for multi-device LoRA finetuning in lora_finetune_distributed.py
+# using a Qwen2.5 32B model
+#
+# This config assumes that you've run the following command before launching
+# this run:
+#   tune download Qwen/Qwen2.5-32B-Instruct --output-dir ../model_zoo_qwen2.5/Qwen2_5-32B-Instruct --ignore-patterns None
+#
+# To launch on 8 devices, run the following command from root:
+#   tune run --nnodes 1 --nproc_per_node 8 lora_finetune_distributed --config qwen2_5/32B_lora
+#
+# You can add specific overrides through the command line. For example
+# to override the checkpointer directory while launching training
+# you can run:
+#   tune run --nnodes 1 --nproc_per_node 8 lora_finetune_distributed --config qwen2_5/32B_lora checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
+
+
+# Model Arguments
+model:
+  _component_: torchtune.models.qwen2_5.qwen2_5_1_5b_instruct_s
+
+tokenizer:
+  _component_: torchtune.models.qwen2_5.qwen2_5_s_tokenizer
+  path: ../model_zoo_qwen2.5/Ichigo-Qwen2.5-1B-Init/vocab.json
+  merges_file: ../model_zoo_qwen2.5/Ichigo-Qwen2.5-1B-Init/merges.txt
+  special_tokens_path: ../model_zoo_qwen2.5/Ichigo-Qwen2.5-1B-Init/added_tokens.json
+  max_seq_len: 1024
+
+checkpointer:
+  _component_: torchtune.training.FullModelHFCheckpointerSaveSteps
+  checkpoint_dir: ../model_zoo_qwen2.5/Ichigo-Qwen2.5-1B-Init
+  checkpoint_files: [model.safetensors]
+  recipe_checkpoint: null
+  output_dir: ../model_zoo_qwen2.5/Qwen2.5-1.5B-T2S
+  model_type: QWEN2
+resume_from_checkpoint: False
+
+# Dataset and Sampler
+dataset:
+  _component_: torchtune.datasets.chat_dataset
+  source: homebrewltd/instruction-convert-audio-whispervq
+  conversation_column: conversations
+  conversation_style: openai
+  split: train
+  train_on_input: True
+seed: 42
+shuffle: False
+save_every_n_steps: 1000
+max_checkpoints: 3
+# Fine-tuning arguments
+batch_size: 14
+epochs: 1
+max_steps_per_epoch: null
+gradient_accumulation_steps: 1
+compile: False
+clip_grad_norm: 1.0
+# Optimizer and Scheduler
+optimizer:
+  _component_: torch.optim.AdamW
+  fused: True
+  weight_decay: 0.01
+  lr: 1e-3
+lr_scheduler:
+  _component_: torchtune.training.lr_schedulers.get_cosine_schedule_with_warmup
+  num_warmup_steps: 200
+
+loss:
+  _component_: torchtune.modules.loss.CEWithChunkedOutputLoss
+
+
+# Logging
+output_dir: ../model_zoo_qwen2.5/Qwen2.5-1.5B-T2S-log
+metric_logger:
+  _component_: torchtune.training.metric_logging.DiskLogger
+  log_dir: ${output_dir}
+log_every_n_steps: 1
+log_peak_memory_stats: False
+
+# Environment
+device: cuda
+dtype: bf16
+enable_activation_checkpointing: False  # True reduces memory
+enable_activation_offloading: False  # True reduces memory
+
+# Show case the usage of pytorch profiler
+# Set enabled to False as it's only needed for debugging training
+profiler:
+  _component_: torchtune.training.setup_torch_profiler
+
+  enabled: False
+
+  #Output directory of trace artifacts
+  output_dir: ${output_dir}/profiling_outputs
+
+  #`torch.profiler.ProfilerActivity` types to trace
+  cpu: True
+  cuda: True
+
+  #trace options passed to `torch.profiler.profile`
+  profile_memory: False
+  with_stack: False
+  record_shapes: True
+  with_flops: False
+
+  # `torch.profiler.schedule` options:
+  # wait_steps -> wait, warmup_steps -> warmup, active_steps -> active, num_cycles -> repeat
+  wait_steps: 5
+  warmup_steps: 5
+  active_steps: 2
+  num_cycles: 1
