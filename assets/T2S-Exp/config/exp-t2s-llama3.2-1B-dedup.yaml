@@ -1,0 +1,115 @@
+# Config for multi-device full finetuning in full_finetune_distributed.py
+# using a Llama3 8B Instruct model
+#
+# This config assumes that you've run the following command before launching
+# this run:
+#   tune download meta-llama/Meta-Llama-3-8B-Instruct --output-dir /tmp/Meta-Llama-3-8B-Instruct --hf-token <HF_TOKEN>
+#
+# To launch on 4 devices, run the following command from root:
+#   tune run --nproc_per_node 4 full_finetune_distributed --config llama3/8B_full
+#
+# You can add specific overrides through the command line. For example
+# to override the checkpointer directory while launching training
+# you can run:
+#   tune run --nproc_per_node 4 full_finetune_distributed --config llama3/8B_full checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
+#
+# This config works best when the model is being fine-tuned on 2+ GPUs.
+# Single device full finetuning requires more memory optimizations. It's
+# best to use 8B_full_single_device.yaml for those cases
+# Tokenizer
+tokenizer:
+  _component_: torchtune.models.llama3.llama3_s_tokenizer
+  path: ../model_zoo_llama3.2/tokenizer_instruct.model
+  max_seq_len: 512
+
+# Dataset
+dataset:
+  _component_: torchtune.datasets.chat_dataset
+  source: jan-hq/instruction-convert-audio-whispervq-llama3.2-dedup
+  conversation_column: conversations
+  conversation_style: openai
+  split: train
+  train_on_input: True
+
+# Model Arguments
+model:
+  _component_: torchtune.models.llama3_2.llama3_2_s_1b
+  # path: model_zoo/Llama3.1_s_8b_init
+checkpointer:
+  _component_: torchtune.training.FullModelHFCheckpointerSaveSteps
+  checkpoint_dir: ../model_zoo_llama3.2/llama3.2-s-1B-whispervq-init
+  checkpoint_files: [
+    model.safetensors,
+  ]
+  recipe_checkpoint: null
+  output_dir: ../model_zoo_llama3.2/llama3.2-1B-T2S-dedup
+  model_type: LLAMA3_2
+resume_from_checkpoint: False
+
+seed: 42
+shuffle: True
+save_every_n_steps: 1000
+max_checkpoints: 3
+# Fine-tuning arguments
+batch_size: 28
+epochs: 3
+max_steps_per_epoch: null
+gradient_accumulation_steps: 1
+compile: False
+clip_grad_norm: 1.0
+# Optimizer and Scheduler
+optimizer:
+  _component_: torch.optim.AdamW #change this to use adam_mini: torchtune.modules.optimizer.Adam_mini
+  weight_decay: 0.01
+  lr: 1.5e-4
+  fused: True
+lr_scheduler:
+  _component_: torchtune.training.lr_schedulers.get_cosine_schedule_with_warmup
+  num_warmup_steps: 200
+
+loss:
+  _component_: torchtune.modules.loss.CEWithChunkedOutputLoss
+
+fsdp:
+  cpu_offload: False
+
+# Logging
+output_dir: ../model_zoo_llama3.2/llama3.2-1B-T2S-log-dedup
+metric_logger:
+  _component_: torchtune.training.metric_logging.DiskLogger
+  log_dir: ${output_dir}
+log_every_n_steps: 1
+log_peak_memory_stats: False
+
+# Environment
+device: cuda
+dtype: bf16
+enable_activation_checkpointing: False  # True reduces memory
+enable_activation_offloading: False  # True reduces memory
+
+# Show case the usage of pytorch profiler
+# Set enabled to False as it's only needed for debugging training
+profiler:
+  _component_: torchtune.training.setup_torch_profiler
+
+  enabled: False
+
+  #Output directory of trace artifacts
+  output_dir: ${output_dir}/profiling_outputs
+
+  #`torch.profiler.ProfilerActivity` types to trace
+  cpu: True
+  cuda: True
+
+  #trace options passed to `torch.profiler.profile`
+  profile_memory: False
+  with_stack: False
+  record_shapes: True
+  with_flops: False
+
+  # `torch.profiler.schedule` options:
+  # wait_steps -> wait, warmup_steps -> warmup, active_steps -> active, num_cycles -> repeat
+  wait_steps: 5
+  warmup_steps: 5
+  active_steps: 2
+  num_cycles: 1
